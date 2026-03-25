@@ -1,60 +1,63 @@
-import sqlite3 from 'sqlite3';
-import { open } from 'sqlite';
-import path from 'path';
+import { openDB } from './db.js';
+import dotenv from 'dotenv';
 
-const dbPath = path.join(process.cwd(), 'database', 'sportssphere.db');
+// Load .env if running scripts locally
+dotenv.config({ path: '.env.local' });
+dotenv.config();
 
 async function setup() {
-  const db = await open({
-    filename: dbPath,
-    driver: sqlite3.Database
-  });
+  console.log('Connecting to Cloud Postgres Database...');
+  
+  if (!process.env.DATABASE_URL) {
+    console.error('❌ ERROR: No DATABASE_URL found. Please create a .env.local file with your Postgres connection string.');
+    process.exit(1);
+  }
 
-  console.log('Opened database at', dbPath);
+  const db = await openDB();
 
-  // Drop existing tables to refresh with seed data
+  // Drop existing tables (CASCADE required in PG to drop relational chains)
   await db.exec(`
-    DROP TABLE IF EXISTS results;
-    DROP TABLE IF EXISTS logistics;
-    DROP TABLE IF EXISTS attendance;
-    DROP TABLE IF EXISTS team;
-    DROP TABLE IF EXISTS trials;
-    DROP TABLE IF EXISTS registrations;
-    DROP TABLE IF EXISTS events;
-    DROP TABLE IF EXISTS admin;
-    DROP TABLE IF EXISTS students;
+    DROP TABLE IF EXISTS results CASCADE;
+    DROP TABLE IF EXISTS logistics CASCADE;
+    DROP TABLE IF EXISTS attendance CASCADE;
+    DROP TABLE IF EXISTS team CASCADE;
+    DROP TABLE IF EXISTS trials CASCADE;
+    DROP TABLE IF EXISTS registrations CASCADE;
+    DROP TABLE IF EXISTS events CASCADE;
+    DROP TABLE IF EXISTS admin CASCADE;
+    DROP TABLE IF EXISTS students CASCADE;
   `);
 
-  console.log('Cleared old tables.');
+  console.log('Cleared old Postgres tables.');
 
-  // Create tables...
+  // Create tables using Postgres syntax (SERIAL instead of AUTOINCREMENT)
   await db.exec(`
     CREATE TABLE students (
-      id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT NOT NULL, email TEXT UNIQUE NOT NULL, password TEXT NOT NULL, course TEXT NOT NULL
+      id SERIAL PRIMARY KEY, name TEXT NOT NULL, email TEXT UNIQUE NOT NULL, password TEXT NOT NULL, course TEXT NOT NULL
     );
     CREATE TABLE admin (
-      id INTEGER PRIMARY KEY AUTOINCREMENT, username TEXT UNIQUE NOT NULL, password TEXT NOT NULL
+      id SERIAL PRIMARY KEY, username TEXT UNIQUE NOT NULL, password TEXT NOT NULL
     );
     CREATE TABLE events (
-      id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT NOT NULL, sport TEXT NOT NULL, date TEXT NOT NULL, eligibility TEXT NOT NULL, status TEXT DEFAULT 'pending', image_url TEXT
+      id SERIAL PRIMARY KEY, name TEXT NOT NULL, sport TEXT NOT NULL, date TEXT NOT NULL, eligibility TEXT NOT NULL, status TEXT DEFAULT 'pending', image_url TEXT
     );
     CREATE TABLE registrations (
-      id INTEGER PRIMARY KEY AUTOINCREMENT, student_id INTEGER NOT NULL, event_id INTEGER NOT NULL, status TEXT DEFAULT 'pending', UNIQUE(student_id, event_id), FOREIGN KEY(student_id) REFERENCES students(id), FOREIGN KEY(event_id) REFERENCES events(id)
+      id SERIAL PRIMARY KEY, student_id INTEGER NOT NULL, event_id INTEGER NOT NULL, status TEXT DEFAULT 'pending', UNIQUE(student_id, event_id), FOREIGN KEY(student_id) REFERENCES students(id) ON DELETE CASCADE, FOREIGN KEY(event_id) REFERENCES events(id) ON DELETE CASCADE
     );
     CREATE TABLE trials (
-      id INTEGER PRIMARY KEY AUTOINCREMENT, student_id INTEGER NOT NULL, event_id INTEGER NOT NULL, attendance TEXT DEFAULT 'absent', selection_status TEXT DEFAULT 'pending', UNIQUE(student_id, event_id), FOREIGN KEY(student_id) REFERENCES students(id), FOREIGN KEY(event_id) REFERENCES events(id)
+      id SERIAL PRIMARY KEY, student_id INTEGER NOT NULL, event_id INTEGER NOT NULL, attendance TEXT DEFAULT 'absent', selection_status TEXT DEFAULT 'pending', UNIQUE(student_id, event_id), FOREIGN KEY(student_id) REFERENCES students(id) ON DELETE CASCADE, FOREIGN KEY(event_id) REFERENCES events(id) ON DELETE CASCADE
     );
     CREATE TABLE team (
-      id INTEGER PRIMARY KEY AUTOINCREMENT, student_id INTEGER NOT NULL, event_id INTEGER NOT NULL, UNIQUE(student_id, event_id), FOREIGN KEY(student_id) REFERENCES students(id), FOREIGN KEY(event_id) REFERENCES events(id)
+      id SERIAL PRIMARY KEY, student_id INTEGER NOT NULL, event_id INTEGER NOT NULL, UNIQUE(student_id, event_id), FOREIGN KEY(student_id) REFERENCES students(id) ON DELETE CASCADE, FOREIGN KEY(event_id) REFERENCES events(id) ON DELETE CASCADE
     );
     CREATE TABLE attendance (
-      id INTEGER PRIMARY KEY AUTOINCREMENT, student_id INTEGER NOT NULL, event_id INTEGER NOT NULL, date TEXT NOT NULL, status TEXT NOT NULL, UNIQUE(student_id, event_id, date), FOREIGN KEY(student_id) REFERENCES students(id), FOREIGN KEY(event_id) REFERENCES events(id)
+      id SERIAL PRIMARY KEY, student_id INTEGER NOT NULL, event_id INTEGER NOT NULL, date TEXT NOT NULL, status TEXT NOT NULL, UNIQUE(student_id, event_id, date), FOREIGN KEY(student_id) REFERENCES students(id) ON DELETE CASCADE, FOREIGN KEY(event_id) REFERENCES events(id) ON DELETE CASCADE
     );
     CREATE TABLE logistics (
-      id INTEGER PRIMARY KEY AUTOINCREMENT, event_id INTEGER NOT NULL, total_students INTEGER DEFAULT 0, ground TEXT, rooms INTEGER DEFAULT 0, food_required INTEGER DEFAULT 0, UNIQUE(event_id), FOREIGN KEY(event_id) REFERENCES events(id)
+      id SERIAL PRIMARY KEY, event_id INTEGER NOT NULL, total_students INTEGER DEFAULT 0, ground TEXT, rooms INTEGER DEFAULT 0, food_required INTEGER DEFAULT 0, UNIQUE(event_id), FOREIGN KEY(event_id) REFERENCES events(id) ON DELETE CASCADE
     );
     CREATE TABLE results (
-      id INTEGER PRIMARY KEY AUTOINCREMENT, event_id INTEGER NOT NULL, winner TEXT, details TEXT, UNIQUE(event_id), FOREIGN KEY(event_id) REFERENCES events(id)
+      id SERIAL PRIMARY KEY, event_id INTEGER NOT NULL, winner TEXT, details TEXT, UNIQUE(event_id), FOREIGN KEY(event_id) REFERENCES events(id) ON DELETE CASCADE
     );
   `);
 
@@ -111,9 +114,11 @@ async function setup() {
   const pastRes = await db.run('INSERT INTO events (name, sport, date, status, eligibility, image_url) VALUES (?, ?, ?, ?, ?, ?)', ['Winter Cricket Blast 2025', 'Cricket', '2025-12-10', 'completed', 'All', '']);
   await db.run('INSERT INTO results (event_id, winner, details) VALUES (?, ?, ?)', [pastRes.lastID, 'CS Department Vipers', 'Won by 24 runs in a thrilling final match. Man of the Series: Aarav Patel.']);
 
-  console.log('Seed data inserted successfully.');
+  console.log('Seed data comprehensively inserted into Postgres! You are ready to launch. 🚀');
+  process.exit(0);
 }
 
 setup().catch(err => {
   console.error('Failed to setup database:', err);
+  process.exit(1);
 });
